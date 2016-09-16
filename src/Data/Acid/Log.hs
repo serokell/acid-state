@@ -157,7 +157,7 @@ readEntities path = do
  where
   worker Done              = []
   worker (Next entry next) = entry : worker next
-  worker (Fail msg)        = error msg
+  worker (Fail _msg)       = []
 
 ensureLeastEntryId :: FileLog object -> EntryId -> IO ()
 ensureLeastEntryId fLog youngestEntry = do
@@ -186,7 +186,7 @@ readEntriesFrom fLog youngestEntry = do
   -- cereal-0.3.5.2 and binary-0.7.1.0. The code should revert back
   -- to lazy bytestrings once the bug has been fixed.
   archive <- liftM Lazy.fromChunks $ mapM (Strict.readFile . snd) relevant
-  let entries = entriesToList $ readEntries archive
+  let entries = entriesToListNoFail $ readEntries archive
   return $ map decode'
          $ take (entryCap - youngestEntry)             -- Take events under the eventCap.
          $ drop (youngestEntry - firstEntryId) entries -- Drop entries that are too young.
@@ -204,7 +204,7 @@ rollbackTo identifier youngestEntry = do
         | otherwise = do
             archive <- Strict.readFile path
             pathHandle <- openFile path WriteMode
-            let entries = entriesToList $ readEntries (Lazy.fromChunks [archive])
+            let entries = entriesToListNoFail $ readEntries (Lazy.fromChunks [archive])
                 entriesToKeep = take (youngestEntry - rangeStart + 1) entries
                 lengthToKeep = Lazy.length (packEntries entriesToKeep)
             hSetFileSize pathHandle (fromIntegral lengthToKeep)
@@ -219,7 +219,7 @@ rollbackWhile identifier filterFn = do
       loop [] = return ()
       loop ((_rangeStart, path) : xs) = do
         archive <- Strict.readFile path
-        let entries = entriesToList $ readEntries (Lazy.fromChunks [archive])
+        let entries = entriesToListNoFail $ readEntries (Lazy.fromChunks [archive])
             entriesToSkip = takeWhile (filterFn . decode') $ reverse entries
             skip_size = Lazy.length (packEntries entriesToSkip)
             orig_size = fromIntegral $ Strict.length archive
@@ -293,7 +293,7 @@ cutFileLog fLog = do
 -- Do not use after the log has been opened.
 -- Implementation: Search the newest log files first. Once a file
 --                 containing at least one valid entry is found,
---                 return the last entry in that file.
+--                 return the last valid entry in that file.
 newestEntry :: SafeCopy object => LogKey object -> IO (Maybe object)
 newestEntry identifier = do
   logFiles <- findLogFiles identifier
@@ -309,10 +309,10 @@ newestEntry identifier = do
     archive <- fmap Lazy.fromStrict $ Strict.readFile logFile
     case Archive.readEntries archive of
       Done            -> worker logFiles
+      Fail _msg       -> worker logFiles
       Next entry next -> return $ Just (decode' (lastEntry entry next))
-      Fail msg        -> error msg
   lastEntry entry Done          = entry
-  lastEntry entry (Fail msg)    = error msg
+  lastEntry entry (Fail _msg)   = entry
   lastEntry _ (Next entry next) = lastEntry entry next
 
 -- Schedule a new log entry. This call does not block
