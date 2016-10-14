@@ -348,17 +348,17 @@ makeEventInstance eventName eventType
 analyseType :: Name -> Type -> ([TyVarBndr], Cxt, [Type], Type, Type, Bool)
 analyseType eventName t = go [] [] [] t
   where
-    getMonadReader :: Cxt -> Name -> [(Type, Type)]
+    getMonadReader :: Cxt -> Name -> [Type]
     getMonadReader cxt m = do
-       constraint@(AppT (AppT (ConT c) x) m') <- cxt
+       AppT (AppT (ConT c) x) m' <- cxt
        guard (c == ''MonadReader && m' == VarT m)
-       return (constraint, x)
+       return x
 
-    getMonadState :: Cxt -> Name -> [(Type, Type)]
+    getMonadState :: Cxt -> Name -> [Type]
     getMonadState cxt m = do
-       constraint@(AppT (AppT (ConT c) x) m') <- cxt
+       AppT (AppT (ConT c) x) m' <- cxt
        guard (c == ''MonadState && m' == VarT m)
-       return (constraint, x)
+       return x
 
     -- a -> b
     go tyvars cxt args (AppT (AppT ArrowT a) b)
@@ -374,14 +374,15 @@ analyseType eventName t = go [] [] [] t
     -- (MonadState state m) => ... -> m result
     -- (MonadReader state m) => ... -> m result
     go tyvars cxt args (AppT (VarT m) result)
-        | [] <- queries, [(cx, state)] <- updates
-            = (tyvars', delete cx cxt, args, state, result, True)
-        | [(cx, state)] <- queries, [] <- updates
-            = (tyvars', delete cx cxt, args, state, result, False)
+        | [] <- queries, [state] <- updates
+            = (tyvars', cxt', args, state, result, True)
+        | [state] <- queries, [] <- updates
+            = (tyvars', cxt', args, state, result, False)
       where
         queries = getMonadReader cxt m
         updates = getMonadState cxt m
         tyvars' = filter ((/= m) . tyVarBndrName) tyvars
+        cxt' = filter ((m `notElem`) . findTyVars) cxt
     -- otherwise, fail
     go _ _ _ _ = error $ "Event has an invalid type signature: Not an Update, Query, MonadState, or MonadReader: " ++ show eventName
 
