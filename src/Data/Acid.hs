@@ -30,6 +30,7 @@ module Data.Acid
     , Query
     , IsAcidic
     , makeAcidic
+    , makeAcidicWithHacks
     , liftQuery
     ) where
 
