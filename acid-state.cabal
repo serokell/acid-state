@@ -47,7 +47,7 @@ Library
                        mtl,
                        network,
                        template-haskell,
-                       th-expand-syns
+                       th-expand-syns >= 0.4.1 && < 0.5
 
   if os(windows)
      Build-depends:       Win32

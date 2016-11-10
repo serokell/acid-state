@@ -102,7 +102,7 @@ getEventType eventName
 #else
            VarI _name eventType _decl _fixity
 #endif
-             -> expandSyns eventType
+             -> expandSynsWith noWarnTypeFamilies eventType
            _ -> error $ "Events must be functions: " ++ show eventName
 
 --instance (SafeCopy key, Typeable key, SafeCopy val, Typeable val) => IsAcidic State where
