@@ -30,6 +30,10 @@ Library
                        Data.Acid.Log, Data.Acid.CRC,
                        Data.Acid.Abstract, Data.Acid.Core
 
+                       Serokell.AcidState.ExtendedState
+                       Serokell.AcidState.Instances
+                       Serokell.AcidState.Util
+
   Other-modules:       Data.Acid.Archive,
                        Paths_acid_state,
                        Data.Acid.TemplateHaskell, Data.Acid.Common, FileIO
@@ -39,15 +43,20 @@ Library
                        bytestring >= 0.10.2,
                        cereal >= 0.4.1.0,
                        containers,
-                       extensible-exceptions,
-                       safecopy >= 0.6,
-                       stm >= 2.4,
                        directory,
                        filepath,
+                       exceptions,
+                       extensible-exceptions,
+                       extra,
+                       hashable,
                        mtl,
                        network,
+                       safecopy >= 0.6,
+                       stm >= 2.4,
                        template-haskell,
-                       th-expand-syns >= 0.4.1 && < 0.5
+                       th-expand-syns >= 0.4.1 && < 0.5,
+                       time-units,
+                       unordered-containers
 
   if os(windows)
      Build-depends:       Win32
