@@ -44,6 +44,7 @@ Library
                        cereal >= 0.4.1.0,
                        containers,
                        directory,
+                       filelock,
                        filepath,
                        exceptions,
                        extensible-exceptions,
