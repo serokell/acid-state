@@ -42,8 +42,9 @@ import Data.SafeCopy                  ( SafeCopy(..), safeGet, safePut
                                       , primitive, contain )
 import Data.Typeable                  ( Typeable, typeOf )
 import Data.IORef
-import System.FilePath                ( (</>) )
+import System.FilePath                ( (</>), takeDirectory )
 import System.FileLock
+import System.Directory               ( createDirectoryIfMissing )
 
 
 {-| State container offering full ACID (Atomicity, Consistency, Isolation and Durability)
@@ -318,7 +319,9 @@ resumeLocalStateFrom directory initialState delayLocking =
                                       , localCheckpoints = checkpointsLog
                                       , localLock = lock
                                       }
-    maybeLockFile path = maybe (throwIO (StateIsLocked path))
+    maybeLockFile path = do
+      createDirectoryIfMissing True (takeDirectory path)
+      maybe (throwIO (StateIsLocked path))
                             pure =<< tryLockFile path Exclusive
 
 
