@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, BangPatterns, CPP #-}
+{-# LANGUAGE DeriveDataTypeable, BangPatterns, CPP, ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Acid.Local
@@ -13,7 +13,8 @@
 --
 
 module Data.Acid.Local
-    ( openLocalState
+    ( getState
+    , openLocalState
     , openLocalStateFrom
     , prepareLocalState
     , prepareLocalStateFrom
@@ -42,6 +43,7 @@ import Data.SafeCopy                  ( SafeCopy(..), safeGet, safePut
                                       , primitive, contain )
 import Data.Typeable                  ( Typeable, typeOf )
 import Data.IORef
+import Data.Either
 import System.FilePath                ( (</>), takeDirectory )
 import System.FileLock
 import System.Directory               ( createDirectoryIfMissing )
@@ -236,7 +238,7 @@ openLocalState initialState =
 prepareLocalState :: (Typeable st, IsAcidic st)
                   => st                          -- ^ Initial state value. This value is only used if no checkpoint is
                                                  --   found.
-                  -> IO (IO (AcidState st))
+                  -> IO (AcidState st)
 prepareLocalState initialState =
   prepareLocalStateFrom ("state" </> show (typeOf initialState)) initialState
 
@@ -251,8 +253,7 @@ openLocalStateFrom :: (IsAcidic st)
                   -> st                  -- ^ Initial state value. This value is only used if no checkpoint is
                                          --   found.
                   -> IO (AcidState st)
-openLocalStateFrom directory initialState =
-  join $ resumeLocalStateFrom directory initialState False
+openLocalStateFrom directory initialState = resumeLocalStateFrom directory initialState False
 
 -- | Create an AcidState given an initial value.
 --
@@ -263,7 +264,7 @@ prepareLocalStateFrom :: (IsAcidic st)
                   => FilePath            -- ^ Location of the checkpoint and transaction files.
                   -> st                  -- ^ Initial state value. This value is only used if no checkpoint is
                                          --   found.
-                  -> IO (IO (AcidState st))
+                  -> IO (AcidState st)
 prepareLocalStateFrom directory initialState =
   resumeLocalStateFrom directory initialState True
 
@@ -274,25 +275,39 @@ resumeLocalStateFrom :: (IsAcidic st)
                   -> st                  -- ^ Initial state value. This value is only used if no checkpoint is
                                          --   found.
                   -> Bool                -- ^ True => load checkpoint before acquiring the lock.
-                  -> IO (IO (AcidState st))
-resumeLocalStateFrom directory initialState delayLocking =
-  case delayLocking of
-    True -> do
-      (n, st) <- loadCheckpoint
-      return $ do
-        lock  <- maybeLockFile lockFile
-        replayEvents lock n st
-    False -> do
-      lock    <- maybeLockFile lockFile
-      (n, st) <- loadCheckpoint `onException` unlockFile lock
-      return $ do
-        replayEvents lock n st
+                  -> IO (AcidState st)
+resumeLocalStateFrom directory initialState delayLocking = do
+  (state,_) <- fromRight (error "getState returned Left with pos == 0") <$>
+    getState directory initialState 0 delayLocking -- getState can return "Left smth only in case of "pos > 0"
+  return state
+
+getState :: forall st . (IsAcidic st)
+                  => FilePath            -- ^ Location of the checkpoint and transaction files.
+                  -> st                  -- ^ Initial state value. This value is only used if no checkpoint is
+                                         --   found.
+                  -> Int                 --   number of desired position in history
+                  -> Bool
+                  -> IO (Either String (AcidState st ,ByteString))
+getState directory initialState pos delayLocking =
+  do
+    if delayLocking
+    then do
+           (n, st) <- loadCheckpoint
+           lock  <- maybeLockFile lockFile
+           replayEventsUntil lock n st pos
+    else do
+           lock    <- maybeLockFile lockFile
+           (n, st) <- loadCheckpoint `onException` unlockFile lock
+           replayEventsUntil lock n st pos
   where
     lockFile = directory </> "open"
+    eventsLogKey :: LogKey (Tagged ByteString)
     eventsLogKey = LogKey { logDirectory = directory
                           , logPrefix = "events" }
+    checkpointsLogKey :: LogKey Checkpoint
     checkpointsLogKey = LogKey { logDirectory = directory
                                , logPrefix = "checkpoints" }
+    loadCheckpoint :: IO (EntryId, st)
     loadCheckpoint = do
       mbLastCheckpoint <- Log.newestEntry checkpointsLogKey
       case mbLastCheckpoint of
@@ -302,27 +317,39 @@ resumeLocalStateFrom directory initialState delayLocking =
           case runGetLazy safeGet content of
             Left msg  -> checkpointRestoreError msg
             Right val -> return (eventCutOff, val)
-    replayEvents lock n st = do
+    replayEventsUntil :: FileLock
+                      -> Int
+                      -> st
+                      -> Int
+                      -> IO (Either String (AcidState st, ByteString))
+    replayEventsUntil lock n st num = do
       core <- mkCore (eventsToMethods acidEvents) st
-
       eventsLog <- openFileLog eventsLogKey
       events <- readEntriesFrom eventsLog n
-      mapM_ (runColdMethod core) events
-      ensureLeastEntryId eventsLog n
-      checkpointsLog <- openFileLog checkpointsLogKey
-      stateCopy <- newIORef undefined
-      withCoreState core (writeIORef stateCopy)
-
-      return $ toAcidState LocalState { localCore = core
+      let numberOfEvents = length events
+      if num < numberOfEvents
+      then do
+        let requestedEvents = take (numberOfEvents - num - 1) events
+        mapM_ (runColdMethod core) requestedEvents
+        let (lastMethod,_) = last requestedEvents
+        ensureLeastEntryId eventsLog n
+        checkpointsLog <- openFileLog checkpointsLogKey
+        stateCopy <- newIORef undefined
+        withCoreState core (writeIORef stateCopy)
+        return $ Right $ (toAcidState LocalState { localCore = core
                                       , localCopy = stateCopy
                                       , localEvents = eventsLog
                                       , localCheckpoints = checkpointsLog
                                       , localLock = lock
-                                      }
+                                      }, lastMethod)
+      else return $ Left $ "This event happened earlier then the last checkpont was done." ++
+                               "There was only " ++ (show numberOfEvents) ++ " events."
+    maybeLockFile :: FilePath -> IO FileLock
     maybeLockFile path = do
       createDirectoryIfMissing True (takeDirectory path)
       maybe (throwIO (StateIsLocked path))
                             pure =<< tryLockFile path Exclusive
+
 
 
 checkpointRestoreError msg
