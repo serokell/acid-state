@@ -1,4 +1,5 @@
-{-# LANGUAGE DeriveDataTypeable, BangPatterns, CPP, ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns, CPP, DeriveDataTypeable, OverloadedStrings,
+             ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Acid.Local
@@ -25,28 +26,27 @@ module Data.Acid.Local
     , Checkpoint(..)
     ) where
 
-import Data.Acid.Log as Log
-import Data.Acid.Core
-import Data.Acid.Common
 import Data.Acid.Abstract
+import Data.Acid.Common
+import Data.Acid.Core
+import Data.Acid.Log as Log
 
-import Control.Concurrent             ( newEmptyMVar, putMVar, takeMVar, MVar )
-import Control.Exception              ( onException, evaluate, Exception, throwIO )
-import Control.Monad.State            ( runState )
-import Control.Monad                  ( join )
-import Control.Applicative            ( (<$>), (<*>) )
-import Data.ByteString.Lazy           ( ByteString )
-import qualified Data.ByteString.Lazy as Lazy ( length )
+import Control.Applicative ((<$>), (<*>))
+import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (Exception, evaluate, onException, throwIO)
+import Control.Monad (join)
+import Control.Monad.State (runState)
+import Data.ByteString.Lazy (ByteString)
+import qualified Data.ByteString.Lazy as Lazy (length)
 
-import Data.Serialize                 ( runPutLazy, runGetLazy )
-import Data.SafeCopy                  ( SafeCopy(..), safeGet, safePut
-                                      , primitive, contain )
-import Data.Typeable                  ( Typeable, typeOf )
-import Data.IORef
 import Data.Either
-import System.FilePath                ( (</>), takeDirectory )
+import Data.IORef
+import Data.SafeCopy (SafeCopy(..), contain, primitive, safeGet, safePut)
+import Data.Serialize (runGetLazy, runPutLazy)
+import Data.Typeable (Typeable, typeOf)
+import System.Directory (createDirectoryIfMissing)
 import System.FileLock
-import System.Directory               ( createDirectoryIfMissing )
+import System.FilePath (takeDirectory, (</>))
 
 
 {-| State container offering full ACID (Atomicity, Consistency, Isolation and Durability)
@@ -327,11 +327,14 @@ getState directory initialState pos delayLocking =
       eventsLog <- openFileLog eventsLogKey
       events <- readEntriesFrom eventsLog n
       let numberOfEvents = length events
-      if num < numberOfEvents
+      if num <= numberOfEvents
       then do
-        let requestedEvents = take (numberOfEvents - num - 1) events
+        let requestedEvents = take (numberOfEvents - num) events
         mapM_ (runColdMethod core) requestedEvents
-        let (lastMethod,_) = last requestedEvents
+        let lastMethod =
+              if null requestedEvents
+              then "This is the initial state. No methods were applied to the DB."
+              else fst $ last requestedEvents
         ensureLeastEntryId eventsLog n
         checkpointsLog <- openFileLog checkpointsLogKey
         stateCopy <- newIORef undefined
