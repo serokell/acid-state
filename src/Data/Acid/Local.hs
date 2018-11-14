@@ -1,4 +1,5 @@
-{-# LANGUAGE DeriveDataTypeable, BangPatterns, CPP, ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns, CPP, DeriveDataTypeable, OverloadedStrings,
+             ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Acid.Local
@@ -327,11 +328,14 @@ getState directory initialState pos delayLocking =
       eventsLog <- openFileLog eventsLogKey
       events <- readEntriesFrom eventsLog n
       let numberOfEvents = length events
-      if num < numberOfEvents
+      if num <= numberOfEvents
       then do
-        let requestedEvents = take (numberOfEvents - num - 1) events
+        let requestedEvents = take (numberOfEvents - num) events
         mapM_ (runColdMethod core) requestedEvents
-        let (lastMethod,_) = last requestedEvents
+        let lastMethod =
+              if null requestedEvents
+              then "This is the initial state. No methods were applied to the DB."
+              else fst $ last requestedEvents
         ensureLeastEntryId eventsLog n
         checkpointsLog <- openFileLog checkpointsLogKey
         stateCopy <- newIORef undefined
